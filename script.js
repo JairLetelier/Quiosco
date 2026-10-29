@@ -1,5 +1,5 @@
-// Pega aquí la NUEVA URL que te dio Google Apps Script
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz53zKogjY_P-mf7UIvhWL5k9U9rABo5Y9eigpjEG0IpciJ_rytSo96gxLtFaQQ-Hw/exec';
+// PEGA AQUÍ TU NUEVA URL GENERADA
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyfV-35uhcBd4eUmelwG-Gg8WOlx4TjxmuyOJNrpmjM9l4j_W2qjE6UHq6wt0aNkLBl/exec';
 let currentType = 'ingreso';
 let chartDiario = null;
 let chartMensual = null;
@@ -48,7 +48,16 @@ document.querySelectorAll('.tab').forEach(tab => {
     });
 });
 
-// --- ENVIAR DATOS (INCLUYE PARCHE ANTI CORS DE GOOGLE) ---
+// --- FUNCIÓN UNIVERSAL PARA ENVIAR/RECIBIR DATOS SIN CORS ---
+async function fetchGoogle(payload) {
+    // Al usar GET, mandamos los datos en la URL. ¡Esto anula el bloqueo de CORS del navegador!
+    const params = encodeURIComponent(JSON.stringify(payload));
+    const url = `${GOOGLE_SCRIPT_URL}?data=${params}`;
+    const response = await fetch(url);
+    return await response.json();
+}
+
+// --- GUARDAR O EDITAR DATOS ---
 form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const pin = localStorage.getItem('quiosco_pin');
@@ -68,13 +77,7 @@ form.addEventListener('submit', async (e) => {
     mostrarEstado('', '');
 
     try {
-        const response = await fetch(GOOGLE_SCRIPT_URL, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            redirect: 'follow', // PARCHE VITAL PARA GOOGLE
-            body: JSON.stringify(payload) 
-        });
-        const result = await response.json();
+        const result = await fetchGoogle(payload);
         
         if (result.status === 'success') {
             mostrarEstado(result.message, 'success');
@@ -83,7 +86,7 @@ form.addEventListener('submit', async (e) => {
             mostrarEstado(result.message, 'error');
         }
     } catch (error) {
-        mostrarEstado('Error de red. Verifica conexión.', 'error');
+        mostrarEstado('Error de conexión.', 'error');
     } finally {
         btnGuardar.disabled = false;
         btnGuardar.innerText = editId ? 'Actualizar Registro' : 'Guardar en Drive';
@@ -97,13 +100,7 @@ async function cargarHistorial() {
     container.innerHTML = '<p style="text-align: center;">Descargando datos...</p>';
 
     try {
-        const response = await fetch(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            redirect: 'follow',
-            body: JSON.stringify({ pin: pin, action: 'get', fecha: document.getElementById('fecha').value })
-        });
-        const result = await response.json();
+        const result = await fetchGoogle({ pin: pin, action: 'get', fecha: document.getElementById('fecha').value });
 
         if (result.status === 'success' && result.data.length > 0) {
             container.innerHTML = '';
@@ -184,13 +181,7 @@ async function renderizarDashboard() {
     const pin = localStorage.getItem('quiosco_pin');
     
     try {
-        const response = await fetch(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            redirect: 'follow',
-            body: JSON.stringify({ pin: pin, action: 'get_dashboard', fecha: document.getElementById('fecha').value })
-        });
-        const result = await response.json();
+        const result = await fetchGoogle({ pin: pin, action: 'get_dashboard', fecha: document.getElementById('fecha').value });
         
         if (result.status === 'success') {
             dibujarGraficoDiario(result.diario);
