@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Caja Quiosco</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Librería para Gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <!-- Pantalla de Login -->
+    <div id="login-screen" class="container active">
+        <div class="card shadow">
+            <h2 style="color: var(--primary-color); margin-bottom: 5px;">Sistema de Caja</h2>
+            <p style="margin-bottom: 20px; color: var(--text-muted);">Ingresa tu PIN autorizado</p>
+            <input type="password" id="pin-input" placeholder="****" maxlength="6">
+            <button id="btn-login" class="btn-primary mt-2">Acceder</button>
+            <p id="login-error" class="error-text hidden">PIN incorrecto</p>
+        </div>
+    </div>
+
+    <!-- Pantalla Principal -->
+    <div id="app-screen" class="container hidden">
+        <header class="app-header">
+            <h1>Control Financiero</h1>
+            <button id="btn-logout" class="btn-icon">Salir</button>
+        </header>
+
+        <!-- Navegación Superior (Actualizada con 3 botones) -->
+        <div class="main-nav">
+            <button class="nav-btn active" onclick="switchView('formulario')">✚ Nuevo</button>
+            <button class="nav-btn" onclick="switchView('historial'); cargarHistorial();">📋 Historial</button>
+            <button class="nav-btn" onclick="switchView('dashboard'); renderizarDashboard();">📊 Gráficos</button>
+        </div>
+
+        <!-- Vista 1: Formulario (Crear/Editar) -->
+        <main id="view-formulario" class="card shadow view-section active">
+            <h3 id="form-title" style="margin-bottom: 15px; color: var(--primary-color);">Nuevo Registro</h3>
+            <div class="tabs" id="type-tabs">
+                <button class="tab active" data-target="ingreso">Venta</button>
+                <button class="tab" data-target="inversion">Inversión</button>
+            </div>
+            <form id="registro-form">
+                <input type="hidden" id="edit-id" value="">
+                <div class="form-group">
+                    <label for="fecha">Fecha</label>
+                    <input type="date" id="fecha" required>
+                </div>
+                <div class="form-group">
+                    <label for="efectivo">Efectivo Físico ($)</label>
+                    <input type="number" id="efectivo" placeholder="0" required>
+                </div>
+                <div class="form-group">
+                    <label for="tarjeta">Tarjeta/Transferencia ($)</label>
+                    <input type="number" id="tarjeta" placeholder="0" required>
+                </div>
+                <div class="form-group">
+                    <label id="label-detalle" for="detalle">Observaciones (Opcional)</label>
+                    <input type="text" id="detalle" placeholder="Ej: Nombre proveedor">
+                </div>
+                <div class="btn-group">
+                    <button type="button" id="btn-cancelar" class="btn-secondary hidden">Cancelar</button>
+                    <button type="submit" id="btn-guardar" class="btn-primary">Guardar en Drive</button>
+                </div>
+                <div id="status-message" class="status-msg hidden"></div>
+            </form>
+        </main>
+
+        <!-- Vista 2: Historial -->
+        <main id="view-historial" class="card shadow view-section hidden">
+            <h3 style="margin-bottom: 15px; color: var(--primary-color);">Últimos Registros del Mes</h3>
+            <div id="historial-lista" class="historial-container">
+                <p style="text-align: center; color: var(--text-muted);">Cargando registros...</p>
+            </div>
+        </main>
+
+        <!-- Vista 3: Dashboard y Gráficos -->
+        <main id="view-dashboard" class="card shadow view-section hidden">
+            <h3 style="margin-bottom: 15px; color: var(--primary-color);">Análisis de Rendimiento</h3>
+            
+            <!-- Indicadores (KPIs) -->
+            <div class="kpi-grid">
+                <div class="kpi-card">
+                    <span>Ingreso Mes</span>
+                    <strong id="kpi-ingresos">$0</strong>
+                </div>
+                <div class="kpi-card">
+                    <span>Inversión Mes</span>
+                    <strong id="kpi-inversion" style="color: var(--error-color);">$0</strong>
+                </div>
+                <div class="kpi-card neta">
+                    <span>Ganancia Neta</span>
+                    <strong id="kpi-neta">$0</strong>
+                </div>
+            </div>
+
+            <!-- 1er Gráfico: Detalle Diario -->
+            <div style="margin-top: 25px;">
+                <h4 style="font-size: 13px; color: var(--text-muted); text-align: center; margin-bottom: 10px;">Movimientos Diarios del Mes</h4>
+                <div style="position: relative; height: 220px; width: 100%;">
+                    <canvas id="graficoDiario"></canvas>
+                </div>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 25px 0;">
+
+            <!-- 2do Gráfico: Histórico Anual -->
+            <div>
+                <h4 style="font-size: 13px; color: var(--text-muted); text-align: center; margin-bottom: 10px;">Crecimiento Anual (Mes a Mes)</h4>
+                <div style="position: relative; height: 250px; width: 100%;">
+                    <canvas id="graficoMensual"></canvas>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
