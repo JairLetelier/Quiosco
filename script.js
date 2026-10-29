@@ -1,9 +1,10 @@
 
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyIcRbdjSGLw9__5aTVbHNWS8SWpDwBN5WqImGAlHQ3GGT-ioHjY0FFW_4o6porgbjm/exec';
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzhvKA6-baYh626PVitYJUVDEUN51Nhei7Ahz_80iRiUyTS1N12xvFG2cgcb9pY7RCj/exec';
 
-let currentType = 'ingreso';
-let chartDiario = null;
-let chartMensual = null;
+let currentType = 'INGRESO';
+let chartSemanal = null;
+let chartResumenMensual = null;
+let chartAnual = null;
 
 const loginScreen = document.getElementById('login-screen');
 const appScreen = document.getElementById('app-screen');
@@ -11,14 +12,84 @@ const form = document.getElementById('registro-form');
 const btnGuardar = document.getElementById('btn-guardar');
 const btnCancelar = document.getElementById('btn-cancelar');
 
-document.getElementById('fecha').valueAsDate = new Date();
+const MONEDA = new Intl.NumberFormat('es-CL', {
+    maximumFractionDigits: 0
+});
 
-// --- LOGIN ---
+const MESES = [
+    'ENERO', 'FEBRERO', 'MARZO', 'ABRIL',
+    'MAYO', 'JUNIO', 'JULIO', 'AGOSTO',
+    'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'
+];
+
+function formatoCLP(valor) {
+    return '$' + MONEDA.format(Number(valor) || 0);
+}
+
+// Acepta 59000, 59.000 y $59.000.
+// Los montos se manejan como pesos chilenos enteros.
+function parseMontoCLP(valor) {
+    if (typeof valor === 'number') {
+        if (!Number.isFinite(valor) || valor < 0 ||
+            !Number.isInteger(valor)) {
+            throw new Error('Ingresa un monto válido en pesos chilenos.');
+        }
+        return valor;
+    }
+
+    let texto = String(valor ?? '').trim();
+
+    if (!texto) return 0;
+
+    texto = texto
+        .replace(/\$/g, '')
+        .replace(/\s/g, '');
+
+    if (!/^\d{1,3}(\.\d{3})+$/.test(texto) &&
+        !/^\d+$/.test(texto)) {
+        throw new Error(
+            'Monto inválido. Ejemplo correcto: 59.000'
+        );
+    }
+
+    const numero = Number(texto.replace(/\./g, ''));
+
+    if (!Number.isSafeInteger(numero) || numero < 0) {
+        throw new Error('El monto ingresado no es válido.');
+    }
+
+    return numero;
+}
+
+function leerMonto(id) {
+    return parseMontoCLP(document.getElementById(id).value);
+}
+
+function fechaLocalISO() {
+    const ahora = new Date();
+    const anio = ahora.getFullYear();
+    const mes = String(ahora.getMonth() + 1).padStart(2, '0');
+    const dia = String(ahora.getDate()).padStart(2, '0');
+
+    return `${anio}-${mes}-${dia}`;
+}
+
+const campoFecha = document.getElementById('fecha');
+
+if (campoFecha && !campoFecha.value) {
+    campoFecha.value = fechaLocalISO();
+}
+
+// ==================================================
+// LOGIN
+// ==================================================
+
 document.getElementById('btn-login').addEventListener('click', async () => {
-    const pin = document.getElementById('pin-input').value;
+    const pin = document.getElementById('pin-input').value.trim();
     const error = document.getElementById('login-error');
 
     if (!pin || pin.length < 6) {
+        error.innerText = 'Ingresa tu PIN.';
         error.classList.remove('hidden');
         return;
     }
@@ -27,26 +98,31 @@ document.getElementById('btn-login').addEventListener('click', async () => {
         const resultado = await fetchGoogle({
             pin,
             action: 'get',
-            fecha: document.getElementById('fecha').value
+            fecha: campoFecha.value || fechaLocalISO()
         });
 
         if (resultado.status !== 'success') {
-            error.classList.remove('hidden');
             error.innerText = resultado.message || 'PIN incorrecto.';
+            error.classList.remove('hidden');
             return;
         }
 
         localStorage.setItem('quiosco_pin', pin);
+
         error.classList.add('hidden');
         loginScreen.classList.remove('active');
         appScreen.classList.remove('hidden');
         appScreen.classList.add('active');
 
-        cargarHistorial();
-        renderizarDashboard();
+        asegurarInterfazDashboard();
+
+        await cargarHistorial();
+        await renderizarDashboard();
+
     } catch (e) {
+        error.innerText =
+            e.message || 'No se pudo conectar con el servidor.';
         error.classList.remove('hidden');
-        error.innerText = e.message || 'No se pudo conectar con el servidor.';
     }
 });
 
@@ -55,18 +131,24 @@ document.getElementById('btn-logout').addEventListener('click', () => {
     location.reload();
 });
 
-// --- NAVEGACIÓN ---
-function switchView(view) {
-    document.querySelectorAll('.view-section').forEach(el =>
-        el.classList.remove('active')
-    );
+// ==================================================
+// NAVEGACIÓN
+// ==================================================
 
-    document.querySelectorAll('.nav-btn').forEach(el =>
-        el.classList.remove('active')
-    );
+function switchView(view) {
+    document.querySelectorAll('.view-section').forEach(el => {
+        el.classList.remove('active');
+    });
+
+    document.querySelectorAll('.nav-btn').forEach(el => {
+        el.classList.remove('active');
+    });
 
     const targetView = document.getElementById('view-' + view);
-    if (targetView) targetView.classList.add('active');
+
+    if (targetView) {
+        targetView.classList.add('active');
+    }
 
     const activeButton = Array.from(
         document.querySelectorAll('.nav-btn')
@@ -74,33 +156,56 @@ function switchView(view) {
         (btn.getAttribute('onclick') || '').includes("'" + view + "'")
     );
 
-    if (activeButton) activeButton.classList.add('active');
+    if (activeButton) {
+        activeButton.classList.add('active');
+    }
 
     if (view === 'historial') cargarHistorial();
     if (view === 'dashboard') renderizarDashboard();
 }
 
+window.switchView = switchView;
+
+// ==================================================
+// TIPO DE MOVIMIENTO
+// ==================================================
+
 document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', e => {
-        document.querySelectorAll('.tab').forEach(t =>
-            t.classList.remove('active')
-        );
+        document.querySelectorAll('.tab').forEach(t => {
+            t.classList.remove('active');
+        });
 
         e.currentTarget.classList.add('active');
-        currentType = e.currentTarget.dataset.target;
 
-        document.getElementById('label-detalle').innerText =
-            currentType === 'inversion'
-                ? 'Proveedor (Requerido)'
-                : 'Observaciones (Opcional)';
+        currentType = String(
+            e.currentTarget.dataset.target || 'ingreso'
+        ).toUpperCase();
 
-        document.getElementById('detalle').required =
-            currentType === 'inversion';
+        actualizarEtiquetaDetalle();
     });
 });
 
-// --- COMUNICACIÓN CON GOOGLE APPS SCRIPT ---
-// Code.gs debe tener doGet(e) y responder_() con soporte JSONP.
+function actualizarEtiquetaDetalle() {
+    const esInversion = currentType === 'INVERSION';
+    const etiqueta = document.getElementById('label-detalle');
+    const detalle = document.getElementById('detalle');
+
+    if (etiqueta) {
+        etiqueta.innerText = esInversion
+            ? 'Proveedor (Requerido)'
+            : 'Observaciones (Opcional)';
+    }
+
+    if (detalle) {
+        detalle.required = esInversion;
+    }
+}
+
+// ==================================================
+// COMUNICACIÓN CON GOOGLE APPS SCRIPT
+// ==================================================
+
 function fetchGoogle(payload) {
     return new Promise((resolve, reject) => {
         const callbackName =
@@ -112,11 +217,11 @@ function fetchGoogle(payload) {
 
         const timeout = setTimeout(() => {
             cleanup(new Error(
-                'Tiempo de espera agotado. Revisa la URL y los permisos de Apps Script.'
+                'Tiempo de espera agotado. Revisa la conexión y la implementación de Apps Script.'
             ));
         }, 20000);
 
-        function cleanup(error, result) {
+        function cleanup(error, resultado) {
             if (terminado) return;
             terminado = true;
 
@@ -128,14 +233,18 @@ function fetchGoogle(payload) {
             }
 
             if (error) reject(error);
-            else resolve(result);
+            else resolve(resultado);
         }
 
-        window[callbackName] = resultado => cleanup(null, resultado);
+        window[callbackName] = resultado => {
+            cleanup(null, resultado);
+        };
 
-        script.onerror = () => cleanup(new Error(
-            'No se pudo cargar la respuesta de Google Apps Script. Comprueba la implementación.'
-        ));
+        script.onerror = () => {
+            cleanup(new Error(
+                'No se pudo obtener respuesta de Google Apps Script.'
+            ));
+        };
 
         const params = new URLSearchParams({
             data: JSON.stringify(payload),
@@ -147,44 +256,61 @@ function fetchGoogle(payload) {
     });
 }
 
-// --- GUARDAR O EDITAR ---
-// Utiliza GET/JSONP en lugar del POST que producía el error 401.
-// Requiere que el doGet actual de Code.gs acepte insert y update.
 async function enviarEscritura(payload) {
     const resultado = await fetchGoogle(payload);
 
     if (!resultado || resultado.status !== 'success') {
         throw new Error(
-            (resultado && resultado.message) ||
+            resultado?.message ||
             'Google Apps Script no confirmó la operación.'
         );
     }
 
-    return {
-        status: 'success',
-        message: payload.action === 'update'
-            ? 'Registro actualizado correctamente.'
-            : 'Registro guardado correctamente.'
-    };
+    return resultado;
 }
+
+// ==================================================
+// GUARDAR Y ACTUALIZAR MOVIMIENTOS
+// ==================================================
 
 form.addEventListener('submit', async e => {
     e.preventDefault();
 
     const pin = localStorage.getItem('quiosco_pin');
-    const editId = document.getElementById('edit-id').value;
-    const action = editId ? 'update' : 'insert';
+
+    if (!pin) {
+        mostrarEstado('Tu sesión expiró. Vuelve a ingresar.', 'error');
+        return;
+    }
+
+    const editId = document.getElementById('edit-id').value.trim();
+
+    let efectivo;
+    let tarjeta;
+
+    try {
+        efectivo = leerMonto('efectivo');
+        tarjeta = leerMonto('tarjeta');
+    } catch (error) {
+        mostrarEstado(error.message, 'error');
+        return;
+    }
 
     const payload = {
-        pin: pin,
-        action: action,
+        pin,
+        action: editId ? 'update' : 'insert',
         id: editId,
         tipo: currentType,
-        fecha: document.getElementById('fecha').value,
-        efectivo: Number(document.getElementById('efectivo').value),
-        tarjeta: Number(document.getElementById('tarjeta').value),
-        detalle: document.getElementById('detalle').value
+        fecha: campoFecha.value,
+        efectivo,
+        tarjeta,
+        detalle: document.getElementById('detalle').value.trim()
     };
+
+    if (!payload.fecha) {
+        mostrarEstado('Selecciona una fecha.', 'error');
+        return;
+    }
 
     btnGuardar.disabled = true;
     btnGuardar.innerText = 'Guardando...';
@@ -193,48 +319,67 @@ form.addEventListener('submit', async e => {
     try {
         const resultado = await enviarEscritura(payload);
 
-        mostrarEstado(resultado.message, 'success');
+        mostrarEstado(
+            resultado.message ||
+                (editId
+                    ? 'Registro actualizado correctamente.'
+                    : 'Registro guardado correctamente.'),
+            'success'
+        );
 
         await cargarHistorial();
         await renderizarDashboard();
 
-        setTimeout(() => resetFormulario(), 2000);
+        resetFormulario();
+
     } catch (error) {
-        mostrarEstado(error.message || 'Error de conexión.', 'error');
+        mostrarEstado(
+            error.message || 'No se pudo guardar el registro.',
+            'error'
+        );
     } finally {
         btnGuardar.disabled = false;
-        btnGuardar.innerText = editId
+
+        const sigueEditando =
+            document.getElementById('edit-id').value !== '';
+
+        btnGuardar.innerText = sigueEditando
             ? 'Actualizar Registro'
-            : 'Guardar en Drive';
+            : 'Guardar en Sheets';
     }
 });
 
-// --- CARGAR HISTORIAL ---
+// ==================================================
+// HISTORIAL: ÚLTIMOS 10 MOVIMIENTOS
+// ==================================================
+
 async function cargarHistorial() {
     const pin = localStorage.getItem('quiosco_pin');
     const container = document.getElementById('historial-lista');
 
-    if (!container) return;
+    if (!container || !pin) return;
 
     container.innerHTML =
-        '<p style="text-align:center">Descargando datos...</p>';
+        '<p style="text-align:center">Cargando últimos movimientos...</p>';
 
     try {
         const resultado = await fetchGoogle({
-            pin: pin,
+            pin,
             action: 'get',
-            fecha: document.getElementById('fecha').value
+            fecha: campoFecha.value || fechaLocalISO()
         });
 
         if (resultado.status !== 'success') {
-            throw new Error(resultado.message || 'No se pudo cargar el historial.');
+            throw new Error(
+                resultado.message || 'No se pudo cargar el historial.'
+            );
         }
 
-        const registros = resultado.data || [];
+        const registros = (resultado.data || []).slice(0, 10);
 
         if (!registros.length) {
             container.innerHTML =
-                '<p style="text-align:center">No hay registros en este mes.</p>';
+                '<p style="text-align:center">No hay registros para el mes seleccionado.</p>';
             return;
         }
 
@@ -244,26 +389,29 @@ async function cargarHistorial() {
             const item = document.createElement('div');
             item.className = 'registro-item';
 
-            const total = Number(reg.total || 0).toLocaleString('es-CL');
-            const efectivo = Number(reg.efectivo || 0).toLocaleString('es-CL');
-            const tarjeta = Number(reg.tarjeta || 0).toLocaleString('es-CL');
+            const total = formatoCLP(reg.total);
+            const efectivo = formatoCLP(reg.efectivo);
+            const tarjeta = formatoCLP(reg.tarjeta);
+            const tipo = String(reg.tipo || '').toUpperCase();
 
             item.innerHTML = `
                 <div class="registro-info">
                     <h4>
-                        <span class="badge ${String(reg.tipo).toLowerCase()}">
-                            ${escapeHtml(reg.tipo)}
+                        <span class="badge ${tipo.toLowerCase()}">
+                            ${escapeHtml(tipo)}
                         </span>
-                        $${total}
+                        ${total}
                     </h4>
                     <p>
-                        📅 ${escapeHtml(reg.fecha)}
-                        | Ef: $${efectivo}
-                        | Tj: $${tarjeta}
+                        📅 ${escapeHtml(reg.fecha || '')}
+                        | Efectivo: ${efectivo}
+                        | Tarjeta: ${tarjeta}
                     </p>
                     <p><i>${escapeHtml(reg.detalle || 'Sin detalle')}</i></p>
                 </div>
-                <button class="btn-edit" type="button">✎ Editar</button>
+                <button class="btn-edit" type="button">
+                    ✎ Editar
+                </button>
             `;
 
             item.querySelector('.btn-edit').addEventListener('click', () => {
@@ -272,54 +420,69 @@ async function cargarHistorial() {
 
             container.appendChild(item);
         });
+
     } catch (error) {
-        container.innerHTML =
-            `<p style="text-align:center;color:red">${
-                escapeHtml(error.message || 'Error al cargar historial.')
-            }</p>`;
+        container.innerHTML = `
+            <p style="text-align:center;color:#dc2626">
+                ${escapeHtml(error.message || 'Error al cargar el historial.')}
+            </p>
+        `;
     }
 }
 
-// --- EDICIÓN ---
+// ==================================================
+// EDITAR MOVIMIENTO
+// ==================================================
+
 window.prepararEdicion = function(registro) {
     document.getElementById('edit-id').value = registro.id;
-    document.getElementById('form-title').innerText =
-        'Corrigiendo Registro';
+    document.getElementById('form-title').innerText = 'Editando registro';
 
-    document.getElementById('fecha').value =
-        String(registro.fecha).split('T')[0];
+    campoFecha.value = String(registro.fecha || '').split('T')[0];
 
-    document.getElementById('fecha').readOnly = true;
-    document.getElementById('efectivo').value = registro.efectivo;
-    document.getElementById('tarjeta').value = registro.tarjeta;
+    // Se mantiene bloqueada la fecha durante la edición para
+    // no trasladar accidentalmente el registro a otra hoja mensual.
+    campoFecha.readOnly = true;
+
+    document.getElementById('efectivo').value =
+        MONEDA.format(Number(registro.efectivo) || 0);
+
+    document.getElementById('tarjeta').value =
+        MONEDA.format(Number(registro.tarjeta) || 0);
+
     document.getElementById('detalle').value = registro.detalle || '';
 
-    document.querySelectorAll('.tab').forEach(t => {
-        t.classList.remove('active');
+    currentType = String(registro.tipo || 'INGRESO').toUpperCase();
+
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.classList.toggle(
+            'active',
+            String(tab.dataset.target || '').toUpperCase() === currentType
+        );
     });
 
-    const tipo = String(registro.tipo).toLowerCase();
-    const tab = document.querySelector(
-        `.tab[data-target="${tipo}"]`
-    );
-
-    if (tab) tab.classList.add('active');
-
-    currentType = tipo;
-
-    document.getElementById('label-detalle').innerText =
-        tipo === 'inversion'
-            ? 'Proveedor (Requerido)'
-            : 'Observaciones (Opcional)';
-
-    document.getElementById('detalle').required = tipo === 'inversion';
+    actualizarEtiquetaDetalle();
 
     btnGuardar.innerText = 'Actualizar Registro';
     btnGuardar.style.backgroundColor = '#059669';
+
     btnCancelar.classList.remove('hidden');
 
-    const nav = document.querySelectorAll('.nav-btn')[0];
-    if (nav) nav.click();
+    const vistaRegistro = document.querySelector(
+        '.nav-btn[onclick*="registro"]'
+    );
+
+    if (vistaRegistro) {
+        vistaRegistro.click();
+    } else {
+        const primeraVista = document.querySelector('.nav-btn');
+        if (primeraVista) primeraVista.click();
+    }
+
+    document.getElementById('form-title').scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+    });
 };
 
 btnCancelar.addEventListener('click', resetFormulario);
@@ -329,36 +492,39 @@ function resetFormulario() {
 
     document.getElementById('edit-id').value = '';
     document.getElementById('form-title').innerText = 'Nuevo Registro';
-    document.getElementById('fecha').valueAsDate = new Date();
-    document.getElementById('fecha').readOnly = false;
 
-    currentType = 'ingreso';
+    campoFecha.value = fechaLocalISO();
+    campoFecha.readOnly = false;
+
+    currentType = 'INGRESO';
 
     document.querySelectorAll('.tab').forEach(tab => {
         tab.classList.toggle(
             'active',
-            tab.dataset.target === 'ingreso'
+            String(tab.dataset.target || '').toUpperCase() === 'INGRESO'
         );
     });
 
-    document.getElementById('label-detalle').innerText =
-        'Observaciones (Opcional)';
+    actualizarEtiquetaDetalle();
 
-    document.getElementById('detalle').required = false;
-
-    btnGuardar.innerText = 'Guardar en Drive';
+    btnGuardar.innerText = 'Guardar en Sheets';
     btnGuardar.style.backgroundColor = 'var(--primary-color)';
-    btnCancelar.classList.add('hidden');
 
-    mostrarEstado('', '');
+    btnCancelar.classList.add('hidden');
 }
 
-// --- MENSAJES ---
+// ==================================================
+// MENSAJES
+// ==================================================
+
 function mostrarEstado(mensaje, tipo) {
     const elemento = document.getElementById('status-message');
 
+    if (!elemento) return;
+
     if (!mensaje) {
         elemento.classList.add('hidden');
+        elemento.innerText = '';
         return;
     }
 
@@ -367,7 +533,7 @@ function mostrarEstado(mensaje, tipo) {
 }
 
 function escapeHtml(valor) {
-    return String(valor).replace(/[&<>"']/g, caracter => ({
+    return String(valor ?? '').replace(/[&<>"']/g, caracter => ({
         '&': '&amp;',
         '<': '&lt;',
         '>': '&gt;',
@@ -376,168 +542,456 @@ function escapeHtml(valor) {
     })[caracter]);
 }
 
-// --- DASHBOARD Y GRÁFICOS ---
-async function renderizarDashboard() {
-    const ingresos = document.getElementById('kpi-ingresos');
-    const inversion = document.getElementById('kpi-inversion');
-    const neta = document.getElementById('kpi-neta');
+// ==================================================
+// CREAR INTERFAZ DE RESÚMENES
+// ==================================================
 
-    if (ingresos) ingresos.innerText = '...';
-    if (inversion) inversion.innerText = '...';
-    if (neta) neta.innerText = '...';
+function asegurarInterfazDashboard() {
+    const dashboard = document.getElementById('view-dashboard');
 
-    try {
-        const resultado = await fetchGoogle({
-            pin: localStorage.getItem('quiosco_pin'),
-            action: 'get_dashboard',
-            fecha: document.getElementById('fecha').value
-        });
+    if (!dashboard) return;
 
-        if (resultado.status !== 'success') {
-            throw new Error(resultado.message || 'No se pudo cargar el panel.');
+    if (!document.getElementById('resumen-periodos')) {
+        const panel = document.createElement('section');
+        panel.id = 'resumen-periodos';
+        panel.style.cssText =
+            'display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:16px 0;';
+
+        panel.innerHTML = `
+            <div class="card resumen-periodo">
+                <h3>Resumen semanal</h3>
+                <p>Ingresos: <strong id="sem-ingresos">$0</strong></p>
+                <p>Inversiones: <strong id="sem-inversiones">$0</strong></p>
+                <p>Ganancia neta: <strong id="sem-neta">$0</strong></p>
+                <small id="sem-fechas"></small>
+            </div>
+            <div class="card resumen-periodo">
+                <h3>Resumen mensual</h3>
+                <p>Ingresos: <strong id="mes-ingresos">$0</strong></p>
+                <p>Inversiones: <strong id="mes-inversiones">$0</strong></p>
+                <p>Ganancia neta: <strong id="mes-neta">$0</strong></p>
+            </div>
+            <div class="card resumen-periodo">
+                <h3>Resumen anual</h3>
+                <p>Ingresos: <strong id="anio-ingresos">$0</strong></p>
+                <p>Inversiones: <strong id="anio-inversiones">$0</strong></p>
+                <p>Ganancia neta: <strong id="anio-neta">$0</strong></p>
+            </div>
+            <div class="card resumen-periodo">
+                <h3>Acumulado histórico</h3>
+                <p>Ingresos: <strong id="hist-ingresos">$0</strong></p>
+                <p>Inversiones: <strong id="hist-inversiones">$0</strong></p>
+                <p>Ganancia neta: <strong id="hist-neta">$0</strong></p>
+            </div>
+        `;
+
+        dashboard.insertBefore(panel, dashboard.firstChild);
+    }
+
+    const canvasDiario = document.getElementById('graficoDiario');
+    const canvasAnual = document.getElementById('graficoMensual');
+
+    if (canvasDiario) {
+        const contenedor = canvasDiario.parentElement;
+
+        if (contenedor) {
+            contenedor.style.minHeight = '280px';
+
+            if (!contenedor.querySelector('.titulo-grafico-semanal')) {
+                const titulo = document.createElement('h3');
+                titulo.className = 'titulo-grafico-semanal';
+                titulo.innerText = 'Actividad semanal: ingresos e inversiones';
+                contenedor.insertBefore(titulo, canvasDiario);
+            }
         }
+    }
 
-        dibujarGraficoDiario(resultado.diario || []);
-        dibujarGraficoAnual(resultado.anual || {});
-    } catch (error) {
-        console.error('Error cargando gráficos:', error);
+    if (canvasAnual) {
+        const contenedor = canvasAnual.parentElement;
+
+        if (contenedor) {
+            contenedor.style.minHeight = '280px';
+
+            if (!contenedor.querySelector('.titulo-grafico-anual')) {
+                const titulo = document.createElement('h3');
+                titulo.className = 'titulo-grafico-anual';
+                titulo.innerText = 'Comparación anual por mes';
+                contenedor.insertBefore(titulo, canvasAnual);
+            }
+        }
+    }
+
+    if (!document.getElementById('graficoResumenMensual')) {
+        const bloque = document.createElement('section');
+
+        bloque.id = 'bloque-grafico-mensual';
+        bloque.style.cssText = 'margin:24px 0;';
+
+        bloque.innerHTML = `
+            <h3>Actividad mensual por día</h3>
+            <div style="position:relative;width:100%;height:300px;">
+                <canvas id="graficoResumenMensual"></canvas>
+            </div>
+        `;
+
+        if (canvasAnual && canvasAnual.parentElement) {
+            canvasAnual.parentElement.before(bloque);
+        } else {
+            dashboard.appendChild(bloque);
+        }
     }
 }
 
-function dibujarGraficoDiario(datosDiarios) {
-    let sumaIngresos = 0;
-    let sumaInversion = 0;
-    const porFecha = {};
+// ==================================================
+// DASHBOARD: SEMANAL, MENSUAL, ANUAL Y ACUMULADO
+// ==================================================
 
-    datosDiarios.forEach(reg => {
-        const monto = Number(reg.total) || 0;
-        const fecha = String(reg.fecha).split('T')[0];
-        const fechaCorta = fecha.substring(5);
+async function renderizarDashboard() {
+    const pin = localStorage.getItem('quiosco_pin');
 
-        if (!porFecha[fechaCorta]) {
-            porFecha[fechaCorta] = { ingreso: 0, inversion: 0 };
-        }
+    if (!pin) return;
 
-        if (String(reg.tipo).toUpperCase() === 'INGRESO') {
-            sumaIngresos += monto;
-            porFecha[fechaCorta].ingreso += monto;
-        } else {
-            sumaInversion += monto;
-            porFecha[fechaCorta].inversion += monto;
+    asegurarInterfazDashboard();
+
+    const resultadoCarga = await fetchGoogle({
+        pin,
+        action: 'get_dashboard',
+        fecha: campoFecha.value || fechaLocalISO()
+    });
+
+    if (!resultadoCarga || resultadoCarga.status !== 'success') {
+        throw new Error(
+            resultadoCarga?.message || 'No se pudo cargar el panel.'
+        );
+    }
+
+    const resultado = resultadoCarga;
+
+    const semanal = resultado.semanal || {};
+    const mensual = resultado.mensual || {};
+    const anual = resultado.anualDetalle || {};
+    const acumulado = resultado.acumulado || {};
+
+    ponerTexto('sem-ingresos', formatoCLP(semanal.ingresos));
+    ponerTexto('sem-inversiones', formatoCLP(semanal.inversiones));
+    ponerTexto('sem-neta', formatoCLP(semanal.neta));
+
+    ponerTexto(
+        'sem-fechas',
+        semanal.inicio && semanal.fin
+            ? `${semanal.inicio} al ${semanal.fin}`
+            : ''
+    );
+
+    ponerTexto('mes-ingresos', formatoCLP(mensual.ingresos));
+    ponerTexto('mes-inversiones', formatoCLP(mensual.inversiones));
+    ponerTexto('mes-neta', formatoCLP(mensual.neta));
+
+    ponerTexto('anio-ingresos', formatoCLP(anual.ingresos));
+    ponerTexto('anio-inversiones', formatoCLP(anual.inversiones));
+    ponerTexto('anio-neta', formatoCLP(anual.neta));
+
+    ponerTexto('hist-ingresos', formatoCLP(acumulado.ingresos));
+    ponerTexto('hist-inversiones', formatoCLP(acumulado.inversiones));
+    ponerTexto('hist-neta', formatoCLP(acumulado.neta));
+
+    // Los KPI originales de la página ahora reflejan el mes actual.
+    ponerTexto('kpi-ingresos', formatoCLP(mensual.ingresos));
+    ponerTexto('kpi-inversion', formatoCLP(mensual.inversiones));
+    ponerTexto('kpi-neta', formatoCLP(mensual.neta));
+
+    dibujarGraficoSemanal(semanal.movimientos || []);
+    dibujarGraficoResumenMensual(mensual.movimientos || []);
+    dibujarGraficoAnual(anual.meses || resultado.anual || {});
+}
+
+function ponerTexto(id, texto) {
+    const elemento = document.getElementById(id);
+
+    if (elemento) {
+        elemento.innerText = texto;
+    }
+}
+
+// ==================================================
+// GRÁFICO SEMANAL: LUNES A DOMINGO
+// ==================================================
+
+function dibujarGraficoSemanal(movimientos) {
+    const canvas = document.getElementById('graficoDiario');
+
+    if (!canvas || typeof Chart === 'undefined') return;
+
+    const dias = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+
+    const valores = dias.map(() => ({
+        ingreso: 0,
+        inversion: 0
+    }));
+
+    movimientos.forEach(mov => {
+        const fecha = parseFechaLocal(mov.fecha);
+
+        if (!fecha) return;
+
+        const indice = (fecha.getDay() + 6) % 7;
+        const total = Number(mov.total) || 0;
+
+        if (String(mov.tipo).toUpperCase() === 'INGRESO') {
+            valores[indice].ingreso += total;
+        } else if (String(mov.tipo).toUpperCase() === 'INVERSION') {
+            valores[indice].inversion += total;
         }
     });
 
-    document.getElementById('kpi-ingresos').innerText =
-        '$' + sumaIngresos.toLocaleString('es-CL');
+    if (chartSemanal) chartSemanal.destroy();
 
-    document.getElementById('kpi-inversion').innerText =
-        '$' + sumaInversion.toLocaleString('es-CL');
-
-    document.getElementById('kpi-neta').innerText =
-        '$' + (sumaIngresos - sumaInversion).toLocaleString('es-CL');
-
-    const etiquetas = Object.keys(porFecha).sort();
-
-    if (chartDiario) chartDiario.destroy();
-
-    const canvas = document.getElementById('graficoDiario');
-    if (!canvas) return;
-
-    chartDiario = new Chart(canvas.getContext('2d'), {
+    chartSemanal = new Chart(canvas.getContext('2d'), {
         type: 'bar',
         data: {
-            labels: etiquetas,
+            labels: dias,
             datasets: [
                 {
                     label: 'Ingresos',
-                    data: etiquetas.map(f => porFecha[f].ingreso),
+                    data: valores.map(v => v.ingreso),
+                    backgroundColor: '#1E3A8A',
+                    borderRadius: 4
+                },
+                {
+                    label: 'Inversiones',
+                    data: valores.map(v => v.inversion),
+                    backgroundColor: '#DC2626',
+                    borderRadius: 4
+                }
+            ]
+        },
+        options: opcionesMonetarias()
+    });
+}
+
+// ==================================================
+// GRÁFICO MENSUAL: INGRESOS, INVERSIONES Y NETO
+// ==================================================
+
+function dibujarGraficoResumenMensual(movimientos) {
+    const canvas = document.getElementById('graficoResumenMensual');
+
+    if (!canvas || typeof Chart === 'undefined') return;
+
+    const porFecha = {};
+
+    movimientos.forEach(mov => {
+        const fecha = String(mov.fecha || '').split('T')[0];
+
+        if (!fecha) return;
+
+        if (!porFecha[fecha]) {
+            porFecha[fecha] = {
+                ingreso: 0,
+                inversion: 0
+            };
+        }
+
+        const total = Number(mov.total) || 0;
+
+        if (String(mov.tipo).toUpperCase() === 'INGRESO') {
+            porFecha[fecha].ingreso += total;
+        } else if (String(mov.tipo).toUpperCase() === 'INVERSION') {
+            porFecha[fecha].inversion += total;
+        }
+    });
+
+    const fechas = Object.keys(porFecha).sort();
+
+    if (chartResumenMensual) chartResumenMensual.destroy();
+
+    chartResumenMensual = new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: fechas.map(fecha => fecha.slice(8, 10)),
+            datasets: [
+                {
+                    label: 'Ingresos',
+                    data: fechas.map(f => porFecha[f].ingreso),
                     backgroundColor: '#1E3A8A',
                     borderRadius: 3
                 },
                 {
-                    label: 'Inversión',
-                    data: etiquetas.map(f => porFecha[f].inversion),
+                    label: 'Inversiones',
+                    data: fechas.map(f => porFecha[f].inversion),
                     backgroundColor: '#DC2626',
                     borderRadius: 3
+                },
+                {
+                    label: 'Ganancia neta',
+                    data: fechas.map(f =>
+                        porFecha[f].ingreso - porFecha[f].inversion
+                    ),
+                    type: 'line',
+                    borderColor: '#059669',
+                    backgroundColor: '#059669',
+                    borderWidth: 2,
+                    tension: 0.25
                 }
             ]
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: { boxWidth: 12 }
-                }
-            }
-        }
+        options: opcionesMonetarias()
     });
 }
 
+// ==================================================
+// GRÁFICO ANUAL: 12 MESES
+// ==================================================
+
 function dibujarGraficoAnual(datosAnuales) {
-    const ordenMeses = [
-        'ENERO', 'FEBRERO', 'MARZO', 'ABRIL',
-        'MAYO', 'JUNIO', 'JULIO', 'AGOSTO',
-        'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'
-    ];
-
-    const meses = Object.keys(datosAnuales).sort(
-        (a, b) => ordenMeses.indexOf(a) - ordenMeses.indexOf(b)
-    );
-
-    const dataIngresos = meses.map(
-        mes => Number(datosAnuales[mes].ingreso) || 0
-    );
-
-    const dataNeta = meses.map(mes =>
-        (Number(datosAnuales[mes].ingreso) || 0) -
-        (Number(datosAnuales[mes].inversion) || 0)
-    );
-
-    if (chartMensual) chartMensual.destroy();
-
     const canvas = document.getElementById('graficoMensual');
-    if (!canvas) return;
 
-    chartMensual = new Chart(canvas.getContext('2d'), {
+    if (!canvas || typeof Chart === 'undefined') return;
+
+    const meses = MESES;
+
+    const valores = meses.map(mes => {
+        const item = datosAnuales[mes] || {};
+
+        return {
+            ingreso: Number(item.ingreso ?? item.ingresos) || 0,
+            inversion: Number(item.inversion ?? item.inversiones) || 0,
+            neta: Number(item.neta) ||
+                ((Number(item.ingreso ?? item.ingresos) || 0) -
+                (Number(item.inversion ?? item.inversiones) || 0))
+        };
+    });
+
+    if (chartAnual) chartAnual.destroy();
+
+    chartAnual = new Chart(canvas.getContext('2d'), {
         type: 'bar',
         data: {
             labels: meses.map(mes => mes.substring(0, 3)),
             datasets: [
                 {
-                    label: 'Ganancia Neta (Línea)',
+                    label: 'Ingresos',
+                    data: valores.map(v => v.ingreso),
+                    backgroundColor: '#1E3A8A',
+                    borderRadius: 3
+                },
+                {
+                    label: 'Inversiones',
+                    data: valores.map(v => v.inversion),
+                    backgroundColor: '#DC2626',
+                    borderRadius: 3
+                },
+                {
+                    label: 'Ganancia neta',
+                    data: valores.map(v => v.neta),
                     type: 'line',
-                    data: dataNeta,
                     borderColor: '#059669',
                     backgroundColor: '#059669',
                     borderWidth: 2,
-                    tension: 0.3,
-                    yAxisID: 'y'
-                },
-                {
-                    label: 'Ingresos Brutos',
-                    type: 'bar',
-                    data: dataIngresos,
-                    backgroundColor: '#D1D5DB',
-                    borderRadius: 4,
-                    yAxisID: 'y'
+                    tension: 0.25
                 }
             ]
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: { boxWidth: 12 }
+        options: opcionesMonetarias()
+    });
+}
+
+// ==================================================
+// OPCIONES COMUNES DE GRÁFICOS
+// ==================================================
+
+function opcionesMonetarias() {
+    return {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+            mode: 'index',
+            intersect: false
+        },
+        plugins: {
+            legend: {
+                position: 'bottom',
+                labels: {
+                    boxWidth: 12
+                }
+            },
+            tooltip: {
+                callbacks: {
+                    label: contexto => {
+                        const valor = Number(contexto.raw) || 0;
+                        return `${contexto.dataset.label}: ${formatoCLP(valor)}`;
+                    }
                 }
             }
+        },
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    callback: valor => '$' + MONEDA.format(Number(valor) || 0)
+                }
+            }
+        }
+    };
+}
+
+function parseFechaLocal(valor) {
+    const texto = String(valor || '').split('T')[0];
+    const partes = /^(\d{4})-(\d{2})-(\d{2})$/.exec(texto);
+
+    if (!partes) return null;
+
+    const fecha = new Date(
+        Number(partes[1]),
+        Number(partes[2]) - 1,
+        Number(partes[3]),
+        12, 0, 0
+    );
+
+    if (
+        fecha.getFullYear() !== Number(partes[1]) ||
+        fecha.getMonth() !== Number(partes[2]) - 1 ||
+        fecha.getDate() !== Number(partes[3])
+    ) {
+        return null;
+    }
+
+    return fecha;
+}
+
+// ==================================================
+// REFRESCAR CUANDO CAMBIA LA FECHA
+// ==================================================
+
+if (campoFecha) {
+    campoFecha.addEventListener('change', async () => {
+        if (document.getElementById('edit-id').value) return;
+
+        if (localStorage.getItem('quiosco_pin')) {
+            await cargarHistorial();
+            await renderizarDashboard();
         }
     });
 }
 
-// Permite que otras partes de la página llamen estas funciones.
+// ==================================================
+// INICIALIZACIÓN
+// ==================================================
+
 window.cargarHistorial = cargarHistorial;
 window.renderizarDashboard = renderizarDashboard;
+window.prepararEdicion = prepararEdicion;
+window.switchView = switchView;
+
+if (localStorage.getItem('quiosco_pin')) {
+    loginScreen?.classList.remove('active');
+    appScreen?.classList.remove('hidden');
+    appScreen?.classList.add('active');
+
+    asegurarInterfazDashboard();
+
+    cargarHistorial().catch(console.error);
+    renderizarDashboard().catch(error => {
+        console.error('No se pudo cargar el panel:', error);
+    });
+}

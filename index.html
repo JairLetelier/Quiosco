@@ -1,120 +1,366 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#ffffff">
     <title>Caja Quiosco</title>
+
     <link rel="stylesheet" href="style.css">
-    <!-- Librería para Gráficos -->
+
+    <!-- Librería para gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-    <!-- Pantalla de Login -->
+    <!-- Pantalla de acceso -->
     <div id="login-screen" class="container active">
         <div class="card shadow">
-            <h2 style="color: var(--primary-color); margin-bottom: 5px;">Sistema de Caja</h2>
-            <p style="margin-bottom: 20px; color: var(--text-muted);">Ingresa tu PIN autorizado</p>
-            <input type="password" id="pin-input" placeholder="PIN" maxlength="12" inputmode="numeric" autocomplete="current-password">
-            <button id="btn-login" class="btn-primary mt-2">Acceder</button>
-            <p id="login-error" class="error-text hidden">PIN incorrecto</p>
+            <h2 style="color: var(--primary-color); margin-bottom: 5px;">
+                Sistema de Caja
+            </h2>
+
+            <p style="margin-bottom: 20px; color: var(--text-muted);">
+                Ingresa tu PIN autorizado
+            </p>
+
+            <input
+                type="password"
+                id="pin-input"
+                placeholder="PIN"
+                maxlength="12"
+                inputmode="numeric"
+                autocomplete="current-password"
+                aria-label="PIN de acceso"
+            >
+
+            <button id="btn-login" class="btn-primary mt-2" type="button">
+                Acceder
+            </button>
+
+            <p id="login-error" class="error-text hidden" role="alert">
+                PIN incorrecto
+            </p>
         </div>
     </div>
 
-    <!-- Pantalla Principal -->
+    <!-- Aplicación principal -->
     <div id="app-screen" class="container hidden">
         <header class="app-header">
             <h1>Control Financiero</h1>
-            <button id="btn-logout" class="btn-icon">Salir</button>
+
+            <button id="btn-logout" class="btn-icon" type="button">
+                Salir
+            </button>
         </header>
 
-        <!-- Navegación Superior (Actualizada con 3 botones) -->
-        <div class="main-nav">
-            <button class="nav-btn active" onclick="switchView('formulario')">✚ Nuevo</button>
-            <button class="nav-btn" onclick="switchView('historial'); cargarHistorial();">📋 Historial</button>
-            <button class="nav-btn" onclick="switchView('dashboard'); renderizarDashboard();">📊 Gráficos</button>
-        </div>
+        <!-- Navegación -->
+        <nav class="main-nav" aria-label="Navegación principal">
+            <button
+                class="nav-btn active"
+                type="button"
+                onclick="switchView('formulario')"
+            >
+                ✚ Nuevo
+            </button>
 
-        <!-- Vista 1: Formulario (Crear/Editar) -->
-        <main id="view-formulario" class="card shadow view-section active">
-            <h3 id="form-title" style="margin-bottom: 15px; color: var(--primary-color);">Nuevo Registro</h3>
+            <button
+                class="nav-btn"
+                type="button"
+                onclick="switchView('historial'); cargarHistorial();"
+            >
+                📋 Historial
+            </button>
+
+            <button
+                class="nav-btn"
+                type="button"
+                onclick="switchView('dashboard'); renderizarDashboard();"
+            >
+                📊 Resúmenes y gráficos
+            </button>
+        </nav>
+
+        <!-- Vista 1: nuevo registro o edición -->
+        <main
+            id="view-formulario"
+            class="card shadow view-section active"
+        >
+            <h3
+                id="form-title"
+                style="margin-bottom: 15px; color: var(--primary-color);"
+            >
+                Nuevo Registro
+            </h3>
+
             <div class="tabs" id="type-tabs">
-                <button class="tab active" data-target="ingreso">Venta</button>
-                <button class="tab" data-target="inversion">Inversión</button>
+                <button
+                    class="tab active"
+                    type="button"
+                    data-target="ingreso"
+                >
+                    Venta
+                </button>
+
+                <button
+                    class="tab"
+                    type="button"
+                    data-target="inversion"
+                >
+                    Inversión
+                </button>
             </div>
+
             <form id="registro-form">
                 <input type="hidden" id="edit-id" value="">
+
                 <div class="form-group">
                     <label for="fecha">Fecha</label>
-                    <input type="date" id="fecha" required>
+
+                    <input
+                        type="date"
+                        id="fecha"
+                        required
+                    >
                 </div>
+
                 <div class="form-group">
-                    <label for="efectivo">Efectivo Físico ($)</label>
-                    <input type="number" id="efectivo" placeholder="0" required>
+                    <label for="efectivo">Efectivo físico (CLP)</label>
+
+                    <input
+                        type="text"
+                        id="efectivo"
+                        placeholder="Ej.: 59.000"
+                        inputmode="numeric"
+                        autocomplete="off"
+                        required
+                        aria-describedby="ayuda-montos"
+                    >
                 </div>
+
                 <div class="form-group">
-                    <label for="tarjeta">Tarjeta/Transferencia ($)</label>
-                    <input type="number" id="tarjeta" placeholder="0" required>
+                    <label for="tarjeta">
+                        Tarjeta / Transferencia (CLP)
+                    </label>
+
+                    <input
+                        type="text"
+                        id="tarjeta"
+                        placeholder="Ej.: 25.000"
+                        inputmode="numeric"
+                        autocomplete="off"
+                        required
+                        aria-describedby="ayuda-montos"
+                    >
+
+                    <small
+                        id="ayuda-montos"
+                        style="display: block; color: var(--text-muted); margin-top: 5px;"
+                    >
+                        Ingresa los montos en pesos chilenos. Puedes usar
+                        puntos como separadores de miles.
+                    </small>
                 </div>
+
                 <div class="form-group">
-                    <label id="label-detalle" for="detalle">Observaciones (Opcional)</label>
-                    <input type="text" id="detalle" placeholder="Ej: Nombre proveedor">
+                    <label id="label-detalle" for="detalle">
+                        Observaciones (opcional)
+                    </label>
+
+                    <input
+                        type="text"
+                        id="detalle"
+                        placeholder="Ej.: Nombre del proveedor"
+                        maxlength="250"
+                    >
                 </div>
+
                 <div class="btn-group">
-                    <button type="button" id="btn-cancelar" class="btn-secondary hidden">Cancelar</button>
-                    <button type="submit" id="btn-guardar" class="btn-primary">Guardar en Drive</button>
+                    <button
+                        type="button"
+                        id="btn-cancelar"
+                        class="btn-secondary hidden"
+                    >
+                        Cancelar
+                    </button>
+
+                    <button
+                        type="submit"
+                        id="btn-guardar"
+                        class="btn-primary"
+                    >
+                        Guardar en Sheets
+                    </button>
                 </div>
-                <div id="status-message" class="status-msg hidden"></div>
+
+                <div
+                    id="status-message"
+                    class="status-msg hidden"
+                    role="status"
+                    aria-live="polite"
+                ></div>
             </form>
         </main>
 
-        <!-- Vista 2: Historial -->
-        <main id="view-historial" class="card shadow view-section hidden">
-            <h3 style="margin-bottom: 15px; color: var(--primary-color);">Últimos Registros del Mes</h3>
-            <div id="historial-lista" class="historial-container">
-                <p style="text-align: center; color: var(--text-muted);">Cargando registros...</p>
+        <!-- Vista 2: historial -->
+        <main
+            id="view-historial"
+            class="card shadow view-section hidden"
+        >
+            <h3
+                style="margin-bottom: 8px; color: var(--primary-color);"
+            >
+                Últimos 10 registros
+            </h3>
+
+            <p
+                style="margin-bottom: 15px; color: var(--text-muted);"
+            >
+                Los registros más recientes aparecen primero.
+                Puedes editar un registro sin eliminar los demás.
+            </p>
+
+            <div
+                id="historial-lista"
+                class="historial-container"
+                aria-live="polite"
+            >
+                <p style="text-align: center; color: var(--text-muted);">
+                    Cargando registros...
+                </p>
             </div>
         </main>
 
-        <!-- Vista 3: Dashboard y Gráficos -->
-        <main id="view-dashboard" class="card shadow view-section hidden">
-            <h3 style="margin-bottom: 15px; color: var(--primary-color);">Análisis de Rendimiento</h3>
-            
-            <!-- Indicadores (KPIs) -->
+        <!-- Vista 3: resúmenes y gráficos -->
+        <main
+            id="view-dashboard"
+            class="card shadow view-section hidden"
+        >
+            <h3
+                style="margin-bottom: 8px; color: var(--primary-color);"
+            >
+                Resúmenes y rendimiento
+            </h3>
+
+            <p
+                style="margin-bottom: 20px; color: var(--text-muted);"
+            >
+                Consulta tus ingresos, inversiones y ganancia neta
+                por semana, mes y año.
+            </p>
+
+            <!-- Indicadores financieros existentes -->
             <div class="kpi-grid">
                 <div class="kpi-card">
-                    <span>Ingreso Mes</span>
+                    <span>Ingresos del mes</span>
                     <strong id="kpi-ingresos">$0</strong>
                 </div>
+
                 <div class="kpi-card">
-                    <span>Inversión Mes</span>
-                    <strong id="kpi-inversion" style="color: var(--error-color);">$0</strong>
+                    <span>Inversiones del mes</span>
+                    <strong
+                        id="kpi-inversion"
+                        style="color: var(--error-color);"
+                    >
+                        $0
+                    </strong>
                 </div>
+
                 <div class="kpi-card neta">
-                    <span>Ganancia Neta</span>
+                    <span>Ganancia neta del mes</span>
                     <strong id="kpi-neta">$0</strong>
                 </div>
             </div>
 
-            <!-- 1er Gráfico: Detalle Diario -->
-            <div style="margin-top: 25px;">
-                <h4 style="font-size: 13px; color: var(--text-muted); text-align: center; margin-bottom: 10px;">Movimientos Diarios del Mes</h4>
-                <div style="position: relative; height: 220px; width: 100%;">
-                    <canvas id="graficoDiario"></canvas>
-                </div>
-            </div>
+            <!-- El script.js podrá incorporar aquí los
+                 resúmenes semanal, mensual y anual. -->
+            <section
+                id="resumenes-periodo"
+                aria-label="Resúmenes por período"
+                style="margin-top: 25px;"
+            ></section>
 
-            <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 25px 0;">
+            <hr
+                style="border: 0; border-top: 1px solid var(--border-color); margin: 25px 0;"
+            >
 
-            <!-- 2do Gráfico: Histórico Anual -->
-            <div>
-                <h4 style="font-size: 13px; color: var(--text-muted); text-align: center; margin-bottom: 10px;">Crecimiento Anual (Mes a Mes)</h4>
-                <div style="position: relative; height: 250px; width: 100%;">
-                    <canvas id="graficoMensual"></canvas>
+            <!-- Gráfico semanal -->
+            <section style="margin-top: 20px;">
+                <h4
+                    style="font-size: 14px; color: var(--text-muted); text-align: center; margin-bottom: 10px;"
+                >
+                    Resumen semanal
+                </h4>
+
+                <div
+                    style="position: relative; height: 240px; width: 100%;"
+                >
+                    <canvas
+                        id="graficoSemanal"
+                        aria-label="Gráfico de ingresos, inversiones y ganancia neta de la semana"
+                        role="img"
+                    ></canvas>
                 </div>
-            </div>
+            </section>
+
+            <hr
+                style="border: 0; border-top: 1px solid var(--border-color); margin: 25px 0;"
+            >
+
+            <!-- Gráfico mensual -->
+            <section style="margin-top: 20px;">
+                <h4
+                    style="font-size: 14px; color: var(--text-muted); text-align: center; margin-bottom: 10px;"
+                >
+                    Resumen mensual
+                </h4>
+
+                <div
+                    style="position: relative; height: 240px; width: 100%;"
+                >
+                    <canvas
+                        id="graficoMensual"
+                        aria-label="Gráfico mensual de ingresos, inversiones y ganancia neta"
+                        role="img"
+                    ></canvas>
+                </div>
+            </section>
+
+            <hr
+                style="border: 0; border-top: 1px solid var(--border-color); margin: 25px 0;"
+            >
+
+            <!-- Gráfico anual -->
+            <section style="margin-top: 20px;">
+                <h4
+                    style="font-size: 14px; color: var(--text-muted); text-align: center; margin-bottom: 10px;"
+                >
+                    Resumen anual
+                </h4>
+
+                <div
+                    style="position: relative; height: 260px; width: 100%;"
+                >
+                    <canvas
+                        id="graficoAnual"
+                        aria-label="Gráfico anual de ingresos, inversiones y ganancia neta"
+                        role="img"
+                    ></canvas>
+                </div>
+            </section>
+
+            <!-- Avisos de año nuevo o de generación de resúmenes -->
+            <div
+                id="aviso-anual"
+                class="status-msg hidden"
+                role="status"
+                aria-live="polite"
+                style="margin-top: 20px;"
+            ></div>
         </main>
     </div>
 
+    <!-- Lógica de la aplicación -->
     <script src="script.js"></script>
 </body>
 </html>
