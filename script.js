@@ -1,5 +1,5 @@
 // PEGA AQUÍ TU NUEVA URL GENERADA
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyfV-35uhcBd4eUmelwG-Gg8WOlx4TjxmuyOJNrpmjM9l4j_W2qjE6UHq6wt0aNkLBl/exec';
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby9sFzqSOoP9Jt8IFRbxSqayoY7Oz0xL8K376rDAudPRD0GxqYBvTnuSSy1qpoxEwte/exec';
 let currentType = 'ingreso';
 let chartDiario = null;
 let chartMensual = null;
@@ -15,7 +15,7 @@ document.getElementById('fecha').valueAsDate = new Date();
 // --- LOGIN ---
 document.getElementById('btn-login').addEventListener('click', () => {
     const pin = document.getElementById('pin-input').value;
-    if (pin.length >= 4) {
+    if (pin.length >= 6) {
         localStorage.setItem('quiosco_pin', pin);
         loginScreen.classList.remove('active');
         appScreen.classList.remove('hidden');
@@ -34,8 +34,10 @@ document.getElementById('btn-logout').addEventListener('click', () => {
 function switchView(view) {
     document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
-    document.getElementById('view-' + view).classList.add('active');
-    event.currentTarget.classList.add('active');
+    const targetView = document.getElementById('view-' + view);
+    if (targetView) targetView.classList.add('active');
+    const activeButton = Array.from(document.querySelectorAll('.nav-btn')).find(btn => (btn.getAttribute('onclick') || '').includes("'" + view + "'"));
+    if (activeButton) activeButton.classList.add('active');
 }
 
 document.querySelectorAll('.tab').forEach(tab => {
@@ -48,13 +50,73 @@ document.querySelectorAll('.tab').forEach(tab => {
     });
 });
 
-// --- FUNCIÓN UNIVERSAL PARA ENVIAR/RECIBIR DATOS SIN CORS ---
-async function fetchGoogle(payload) {
-    // Al usar GET, mandamos los datos en la URL. ¡Esto anula el bloqueo de CORS del navegador!
-    const params = encodeURIComponent(JSON.stringify(payload));
-    const url = `${GOOGLE_SCRIPT_URL}?data=${params}`;
-    const response = await fetch(url);
-    return await response.json();
+// --- COMUNICACIÓN CON GOOGLE APPS SCRIPT ---
+// Las lecturas usan JSONP para evitar que fetch lea una respuesta cross-origin.
+function fetchGoogle(payload) {
+    return new Promise((resolve, reject) => {
+        const callbackName = 'gsCallback_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        const script = document.createElement('script');
+        const timeout = setTimeout(() => cleanup(new Error('Tiempo de espera agotado al contactar Google Apps Script.')), 15000);
+
+        function cleanup(error, result) {
+            clearTimeout(timeout);
+            if (window[callbackName]) delete window[callbackName];
+            if (script.parentNode) script.parentNode.removeChild(script);
+            if (error) reject(error);
+            else resolve(result);
+        }
+
+        window[callbackName] = (result) => cleanup(null, result);
+        script.onerror = () => cleanup(new Error('No se pudo cargar la respuesta de Google Apps Script.'));
+        const params = new URLSearchParams({ data: JSON.stringify(payload), callback: callbackName });
+        script.src = `${GOOGLE_SCRIPT_URL}?${params.toString()}`;
+        document.head.appendChild(script);
+    });
+}
+
+// Las escrituras se envían por POST no-cors; el navegador no permite leer
+// esa respuesta. Por eso verificamos el resultado mediante una lectura JSONP.
+async function enviarEscritura(payload) {
+    await fetch(GOOGLE_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+    });
+
+    // Dar tiempo a Apps Script para escribir en Sheets y luego comprobarlo.
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    const verificacion = await fetchGoogle({
+        pin: payload.pin,
+        action: 'get',
+        fecha: payload.fecha
+    });
+
+    if (!verificacion || verificacion.status !== 'success') {
+        throw new Error((verificacion && verificacion.message) || 'No se pudo verificar el registro.');
+    }
+
+    if (payload.action === 'insert') {
+        const coincide = (verificacion.data || []).some(reg =>
+            reg.fecha === payload.fecha &&
+            reg.tipo === payload.tipo.toUpperCase() &&
+            Number(reg.efectivo) === Number(payload.efectivo) &&
+            Number(reg.tarjeta) === Number(payload.tarjeta) &&
+            String(reg.detalle || '') === String(payload.detalle || '')
+        );
+        if (!coincide) throw new Error('No se pudo confirmar el registro en la hoja. Revisa la conexión antes de volver a enviarlo.');
+    } else if (payload.action === 'update') {
+        const actualizado = (verificacion.data || []).some(reg =>
+            String(reg.id) === String(payload.id) &&
+            reg.tipo === payload.tipo.toUpperCase() &&
+            Number(reg.efectivo) === Number(payload.efectivo) &&
+            Number(reg.tarjeta) === Number(payload.tarjeta) &&
+            String(reg.detalle || '') === String(payload.detalle || '')
+        );
+        if (!actualizado) throw new Error('No se pudo confirmar la actualización. Revisa el historial antes de volver a intentarlo.');
+    }
+
+    return { status: 'success', message: payload.action === 'update' ? 'Registro actualizado y verificado.' : 'Registro guardado y verificado.' };
 }
 
 // --- GUARDAR O EDITAR DATOS ---
@@ -77,7 +139,7 @@ form.addEventListener('submit', async (e) => {
     mostrarEstado('', '');
 
     try {
-        const result = await fetchGoogle(payload);
+        const result = await enviarEscritura(payload);
         
         if (result.status === 'success') {
             mostrarEstado(result.message, 'success');
@@ -86,7 +148,7 @@ form.addEventListener('submit', async (e) => {
             mostrarEstado(result.message, 'error');
         }
     } catch (error) {
-        mostrarEstado('Error de conexión.', 'error');
+        mostrarEstado(error.message || 'Error de conexión.', 'error');
     } finally {
         btnGuardar.disabled = false;
         btnGuardar.innerText = editId ? 'Actualizar Registro' : 'Guardar en Drive';
@@ -115,7 +177,7 @@ async function cargarHistorial() {
                     <div class="registro-info">
                         <h4><span class="badge ${reg.tipo.toLowerCase()}">${reg.tipo}</span> $${total}</h4>
                         <p>📅 ${new Date(reg.fecha).toLocaleDateString()} | Ef: $${ef} | Tj: $${tj}</p>
-                        <p><i>${reg.detalle || 'Sin detalle'}</i></p>
+                        <p><i>${escapeHtml(reg.detalle || 'Sin detalle')}</i></p>
                     </div>
                     <button class="btn-edit" onclick='prepararEdicion(${JSON.stringify(reg)})'>✎ Editar</button>
                 `;
@@ -170,6 +232,10 @@ function mostrarEstado(mensaje, tipo) {
     if (!mensaje) { statusMsg.classList.add('hidden'); return; }
     statusMsg.innerText = mensaje;
     statusMsg.className = `status-msg ${tipo}`;
+}
+
+function escapeHtml(value) {
+    return String(value).replace(/[&<>\"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[ch]));
 }
 
 // --- DASHBOARD Y GRÁFICOS ---
