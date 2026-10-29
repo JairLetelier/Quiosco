@@ -1,5 +1,6 @@
-// PEGA AQUÍ TU NUEVA URL GENERADA
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby9sFzqSOoP9Jt8IFRbxSqayoY7Oz0xL8K376rDAudPRD0GxqYBvTnuSSy1qpoxEwte/exec';
+
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzDghmRzksyMetthrFPI0Y1MsuvnTbvLKYdnR1OeX9hnsa2xo33qJ1-6HeiyWVTWJOF/exec';
+
 let currentType = 'ingreso';
 let chartDiario = null;
 let chartMensual = null;
@@ -13,15 +14,39 @@ const btnCancelar = document.getElementById('btn-cancelar');
 document.getElementById('fecha').valueAsDate = new Date();
 
 // --- LOGIN ---
-document.getElementById('btn-login').addEventListener('click', () => {
+document.getElementById('btn-login').addEventListener('click', async () => {
     const pin = document.getElementById('pin-input').value;
-    if (pin.length >= 6) {
+    const error = document.getElementById('login-error');
+
+    if (!pin || pin.length < 6) {
+        error.classList.remove('hidden');
+        return;
+    }
+
+    try {
+        const resultado = await fetchGoogle({
+            pin,
+            action: 'get',
+            fecha: document.getElementById('fecha').value
+        });
+
+        if (resultado.status !== 'success') {
+            error.classList.remove('hidden');
+            error.innerText = resultado.message || 'PIN incorrecto.';
+            return;
+        }
+
         localStorage.setItem('quiosco_pin', pin);
+        error.classList.add('hidden');
         loginScreen.classList.remove('active');
         appScreen.classList.remove('hidden');
         appScreen.classList.add('active');
-    } else {
-        document.getElementById('login-error').classList.remove('hidden');
+
+        cargarHistorial();
+        renderizarDashboard();
+    } catch (e) {
+        error.classList.remove('hidden');
+        error.innerText = e.message || 'No se pudo conectar con el servidor.';
     }
 });
 
@@ -32,102 +57,129 @@ document.getElementById('btn-logout').addEventListener('click', () => {
 
 // --- NAVEGACIÓN ---
 function switchView(view) {
-    document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
-    document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.view-section').forEach(el =>
+        el.classList.remove('active')
+    );
+
+    document.querySelectorAll('.nav-btn').forEach(el =>
+        el.classList.remove('active')
+    );
+
     const targetView = document.getElementById('view-' + view);
     if (targetView) targetView.classList.add('active');
-    const activeButton = Array.from(document.querySelectorAll('.nav-btn')).find(btn => (btn.getAttribute('onclick') || '').includes("'" + view + "'"));
+
+    const activeButton = Array.from(
+        document.querySelectorAll('.nav-btn')
+    ).find(btn =>
+        (btn.getAttribute('onclick') || '').includes("'" + view + "'")
+    );
+
     if (activeButton) activeButton.classList.add('active');
+
+    if (view === 'historial') cargarHistorial();
+    if (view === 'dashboard') renderizarDashboard();
 }
 
 document.querySelectorAll('.tab').forEach(tab => {
-    tab.addEventListener('click', (e) => {
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        e.target.classList.add('active');
-        currentType = e.target.dataset.target;
-        document.getElementById('label-detalle').innerText = currentType === 'inversion' ? 'Proveedor (Requerido)' : 'Observaciones (Opcional)';
-        document.getElementById('detalle').required = currentType === 'inversion';
+    tab.addEventListener('click', e => {
+        document.querySelectorAll('.tab').forEach(t =>
+            t.classList.remove('active')
+        );
+
+        e.currentTarget.classList.add('active');
+        currentType = e.currentTarget.dataset.target;
+
+        document.getElementById('label-detalle').innerText =
+            currentType === 'inversion'
+                ? 'Proveedor (Requerido)'
+                : 'Observaciones (Opcional)';
+
+        document.getElementById('detalle').required =
+            currentType === 'inversion';
     });
 });
 
 // --- COMUNICACIÓN CON GOOGLE APPS SCRIPT ---
-// Las lecturas usan JSONP para evitar que fetch lea una respuesta cross-origin.
+// Code.gs debe tener doGet(e) y responder_() con soporte JSONP.
 function fetchGoogle(payload) {
     return new Promise((resolve, reject) => {
-        const callbackName = 'gsCallback_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        const callbackName =
+            'gsCallback_' + Date.now() + '_' +
+            Math.random().toString(36).slice(2);
+
         const script = document.createElement('script');
-        const timeout = setTimeout(() => cleanup(new Error('Tiempo de espera agotado al contactar Google Apps Script.')), 15000);
+        let terminado = false;
+
+        const timeout = setTimeout(() => {
+            cleanup(new Error(
+                'Tiempo de espera agotado. Revisa la URL y los permisos de Apps Script.'
+            ));
+        }, 20000);
 
         function cleanup(error, result) {
+            if (terminado) return;
+            terminado = true;
+
             clearTimeout(timeout);
-            if (window[callbackName]) delete window[callbackName];
-            if (script.parentNode) script.parentNode.removeChild(script);
+            delete window[callbackName];
+
+            if (script.parentNode) {
+                script.parentNode.removeChild(script);
+            }
+
             if (error) reject(error);
             else resolve(result);
         }
 
-        window[callbackName] = (result) => cleanup(null, result);
-        script.onerror = () => cleanup(new Error('No se pudo cargar la respuesta de Google Apps Script.'));
-        const params = new URLSearchParams({ data: JSON.stringify(payload), callback: callbackName });
+        window[callbackName] = resultado => cleanup(null, resultado);
+
+        script.onerror = () => cleanup(new Error(
+            'No se pudo cargar la respuesta de Google Apps Script. Comprueba la implementación.'
+        ));
+
+        const params = new URLSearchParams({
+            data: JSON.stringify(payload),
+            callback: callbackName
+        });
+
         script.src = `${GOOGLE_SCRIPT_URL}?${params.toString()}`;
         document.head.appendChild(script);
     });
 }
 
-// Las escrituras se envían por POST no-cors; el navegador no permite leer
-// esa respuesta. Por eso verificamos el resultado mediante una lectura JSONP.
+// --- GUARDAR O EDITAR ---
+// Utiliza GET/JSONP en lugar del POST que producía el error 401.
+// Requiere que el doGet actual de Code.gs acepte insert y update.
 async function enviarEscritura(payload) {
-    await fetch(GOOGLE_SCRIPT_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(payload)
-    });
+    const resultado = await fetchGoogle(payload);
 
-    // Dar tiempo a Apps Script para escribir en Sheets y luego comprobarlo.
-    await new Promise(resolve => setTimeout(resolve, 1200));
-    const verificacion = await fetchGoogle({
-        pin: payload.pin,
-        action: 'get',
-        fecha: payload.fecha
-    });
-
-    if (!verificacion || verificacion.status !== 'success') {
-        throw new Error((verificacion && verificacion.message) || 'No se pudo verificar el registro.');
+    if (!resultado || resultado.status !== 'success') {
+        throw new Error(
+            (resultado && resultado.message) ||
+            'Google Apps Script no confirmó la operación.'
+        );
     }
 
-    if (payload.action === 'insert') {
-        const coincide = (verificacion.data || []).some(reg =>
-            reg.fecha === payload.fecha &&
-            reg.tipo === payload.tipo.toUpperCase() &&
-            Number(reg.efectivo) === Number(payload.efectivo) &&
-            Number(reg.tarjeta) === Number(payload.tarjeta) &&
-            String(reg.detalle || '') === String(payload.detalle || '')
-        );
-        if (!coincide) throw new Error('No se pudo confirmar el registro en la hoja. Revisa la conexión antes de volver a enviarlo.');
-    } else if (payload.action === 'update') {
-        const actualizado = (verificacion.data || []).some(reg =>
-            String(reg.id) === String(payload.id) &&
-            reg.tipo === payload.tipo.toUpperCase() &&
-            Number(reg.efectivo) === Number(payload.efectivo) &&
-            Number(reg.tarjeta) === Number(payload.tarjeta) &&
-            String(reg.detalle || '') === String(payload.detalle || '')
-        );
-        if (!actualizado) throw new Error('No se pudo confirmar la actualización. Revisa el historial antes de volver a intentarlo.');
-    }
-
-    return { status: 'success', message: payload.action === 'update' ? 'Registro actualizado y verificado.' : 'Registro guardado y verificado.' };
+    return {
+        status: 'success',
+        message: payload.action === 'update'
+            ? 'Registro actualizado correctamente.'
+            : 'Registro guardado correctamente.'
+    };
 }
 
-// --- GUARDAR O EDITAR DATOS ---
-form.addEventListener('submit', async (e) => {
+form.addEventListener('submit', async e => {
     e.preventDefault();
+
     const pin = localStorage.getItem('quiosco_pin');
     const editId = document.getElementById('edit-id').value;
     const action = editId ? 'update' : 'insert';
 
     const payload = {
-        pin: pin, action: action, id: editId, tipo: currentType,
+        pin: pin,
+        action: action,
+        id: editId,
+        tipo: currentType,
         fecha: document.getElementById('fecha').value,
         efectivo: Number(document.getElementById('efectivo').value),
         tarjeta: Number(document.getElementById('tarjeta').value),
@@ -139,19 +191,21 @@ form.addEventListener('submit', async (e) => {
     mostrarEstado('', '');
 
     try {
-        const result = await enviarEscritura(payload);
-        
-        if (result.status === 'success') {
-            mostrarEstado(result.message, 'success');
-            setTimeout(() => { resetFormulario(); }, 2000);
-        } else {
-            mostrarEstado(result.message, 'error');
-        }
+        const resultado = await enviarEscritura(payload);
+
+        mostrarEstado(resultado.message, 'success');
+
+        await cargarHistorial();
+        await renderizarDashboard();
+
+        setTimeout(() => resetFormulario(), 2000);
     } catch (error) {
         mostrarEstado(error.message || 'Error de conexión.', 'error');
     } finally {
         btnGuardar.disabled = false;
-        btnGuardar.innerText = editId ? 'Actualizar Registro' : 'Guardar en Drive';
+        btnGuardar.innerText = editId
+            ? 'Actualizar Registro'
+            : 'Guardar en Drive';
     }
 });
 
@@ -159,156 +213,331 @@ form.addEventListener('submit', async (e) => {
 async function cargarHistorial() {
     const pin = localStorage.getItem('quiosco_pin');
     const container = document.getElementById('historial-lista');
-    container.innerHTML = '<p style="text-align: center;">Descargando datos...</p>';
+
+    if (!container) return;
+
+    container.innerHTML =
+        '<p style="text-align:center">Descargando datos...</p>';
 
     try {
-        const result = await fetchGoogle({ pin: pin, action: 'get', fecha: document.getElementById('fecha').value });
+        const resultado = await fetchGoogle({
+            pin: pin,
+            action: 'get',
+            fecha: document.getElementById('fecha').value
+        });
 
-        if (result.status === 'success' && result.data.length > 0) {
-            container.innerHTML = '';
-            result.data.forEach(reg => {
-                const item = document.createElement('div');
-                item.className = 'registro-item';
-                const total = Number(reg.total).toLocaleString('es-CL');
-                const ef = Number(reg.efectivo).toLocaleString('es-CL');
-                const tj = Number(reg.tarjeta).toLocaleString('es-CL');
-                
-                item.innerHTML = `
-                    <div class="registro-info">
-                        <h4><span class="badge ${reg.tipo.toLowerCase()}">${reg.tipo}</span> $${total}</h4>
-                        <p>📅 ${new Date(reg.fecha).toLocaleDateString()} | Ef: $${ef} | Tj: $${tj}</p>
-                        <p><i>${escapeHtml(reg.detalle || 'Sin detalle')}</i></p>
-                    </div>
-                    <button class="btn-edit" onclick='prepararEdicion(${JSON.stringify(reg)})'>✎ Editar</button>
-                `;
-                container.appendChild(item);
-            });
-        } else {
-            container.innerHTML = '<p style="text-align: center;">No hay registros en este mes.</p>';
+        if (resultado.status !== 'success') {
+            throw new Error(resultado.message || 'No se pudo cargar el historial.');
         }
+
+        const registros = resultado.data || [];
+
+        if (!registros.length) {
+            container.innerHTML =
+                '<p style="text-align:center">No hay registros en este mes.</p>';
+            return;
+        }
+
+        container.innerHTML = '';
+
+        registros.forEach(reg => {
+            const item = document.createElement('div');
+            item.className = 'registro-item';
+
+            const total = Number(reg.total || 0).toLocaleString('es-CL');
+            const efectivo = Number(reg.efectivo || 0).toLocaleString('es-CL');
+            const tarjeta = Number(reg.tarjeta || 0).toLocaleString('es-CL');
+
+            item.innerHTML = `
+                <div class="registro-info">
+                    <h4>
+                        <span class="badge ${String(reg.tipo).toLowerCase()}">
+                            ${escapeHtml(reg.tipo)}
+                        </span>
+                        $${total}
+                    </h4>
+                    <p>
+                        📅 ${escapeHtml(reg.fecha)}
+                        | Ef: $${efectivo}
+                        | Tj: $${tarjeta}
+                    </p>
+                    <p><i>${escapeHtml(reg.detalle || 'Sin detalle')}</i></p>
+                </div>
+                <button class="btn-edit" type="button">✎ Editar</button>
+            `;
+
+            item.querySelector('.btn-edit').addEventListener('click', () => {
+                prepararEdicion(reg);
+            });
+
+            container.appendChild(item);
+        });
     } catch (error) {
-        container.innerHTML = '<p style="text-align: center; color: red;">Error al cargar historial.</p>';
+        container.innerHTML =
+            `<p style="text-align:center;color:red">${
+                escapeHtml(error.message || 'Error al cargar historial.')
+            }</p>`;
     }
 }
 
-// --- EDICIÓN Y UTILIDADES ---
+// --- EDICIÓN ---
 window.prepararEdicion = function(registro) {
     document.getElementById('edit-id').value = registro.id;
-    document.getElementById('form-title').innerText = "Corrigiendo Registro";
-    document.getElementById('fecha').value = registro.fecha.split('T')[0];
-    document.getElementById('fecha').readOnly = true; 
-    
+    document.getElementById('form-title').innerText =
+        'Corrigiendo Registro';
+
+    document.getElementById('fecha').value =
+        String(registro.fecha).split('T')[0];
+
+    document.getElementById('fecha').readOnly = true;
     document.getElementById('efectivo').value = registro.efectivo;
     document.getElementById('tarjeta').value = registro.tarjeta;
-    document.getElementById('detalle').value = registro.detalle;
+    document.getElementById('detalle').value = registro.detalle || '';
 
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    const tabTarget = document.querySelector(`.tab[data-target="${registro.tipo.toLowerCase()}"]`);
-    if(tabTarget) tabTarget.classList.add('active');
-    currentType = registro.tipo.toLowerCase();
+    document.querySelectorAll('.tab').forEach(t => {
+        t.classList.remove('active');
+    });
 
-    btnGuardar.innerText = "Actualizar Registro";
-    btnGuardar.style.backgroundColor = "#059669"; 
+    const tipo = String(registro.tipo).toLowerCase();
+    const tab = document.querySelector(
+        `.tab[data-target="${tipo}"]`
+    );
+
+    if (tab) tab.classList.add('active');
+
+    currentType = tipo;
+
+    document.getElementById('label-detalle').innerText =
+        tipo === 'inversion'
+            ? 'Proveedor (Requerido)'
+            : 'Observaciones (Opcional)';
+
+    document.getElementById('detalle').required = tipo === 'inversion';
+
+    btnGuardar.innerText = 'Actualizar Registro';
+    btnGuardar.style.backgroundColor = '#059669';
     btnCancelar.classList.remove('hidden');
-    document.querySelectorAll('.nav-btn')[0].click();
+
+    const nav = document.querySelectorAll('.nav-btn')[0];
+    if (nav) nav.click();
 };
 
 btnCancelar.addEventListener('click', resetFormulario);
 
 function resetFormulario() {
     form.reset();
-    document.getElementById('edit-id').value = "";
-    document.getElementById('form-title').innerText = "Nuevo Registro";
+
+    document.getElementById('edit-id').value = '';
+    document.getElementById('form-title').innerText = 'Nuevo Registro';
     document.getElementById('fecha').valueAsDate = new Date();
     document.getElementById('fecha').readOnly = false;
-    btnGuardar.innerText = "Guardar en Drive";
-    btnGuardar.style.backgroundColor = "var(--primary-color)";
+
+    currentType = 'ingreso';
+
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.classList.toggle(
+            'active',
+            tab.dataset.target === 'ingreso'
+        );
+    });
+
+    document.getElementById('label-detalle').innerText =
+        'Observaciones (Opcional)';
+
+    document.getElementById('detalle').required = false;
+
+    btnGuardar.innerText = 'Guardar en Drive';
+    btnGuardar.style.backgroundColor = 'var(--primary-color)';
     btnCancelar.classList.add('hidden');
-    mostrarEstado('','');
+
+    mostrarEstado('', '');
 }
 
+// --- MENSAJES ---
 function mostrarEstado(mensaje, tipo) {
-    const statusMsg = document.getElementById('status-message');
-    if (!mensaje) { statusMsg.classList.add('hidden'); return; }
-    statusMsg.innerText = mensaje;
-    statusMsg.className = `status-msg ${tipo}`;
+    const elemento = document.getElementById('status-message');
+
+    if (!mensaje) {
+        elemento.classList.add('hidden');
+        return;
+    }
+
+    elemento.innerText = mensaje;
+    elemento.className = `status-msg ${tipo}`;
 }
 
-function escapeHtml(value) {
-    return String(value).replace(/[&<>\"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[ch]));
+function escapeHtml(valor) {
+    return String(valor).replace(/[&<>"']/g, caracter => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    })[caracter]);
 }
 
 // --- DASHBOARD Y GRÁFICOS ---
 async function renderizarDashboard() {
-    document.getElementById('kpi-ingresos').innerText = "...";
-    document.getElementById('kpi-inversion').innerText = "...";
-    document.getElementById('kpi-neta').innerText = "...";
-    
-    const pin = localStorage.getItem('quiosco_pin');
-    
+    const ingresos = document.getElementById('kpi-ingresos');
+    const inversion = document.getElementById('kpi-inversion');
+    const neta = document.getElementById('kpi-neta');
+
+    if (ingresos) ingresos.innerText = '...';
+    if (inversion) inversion.innerText = '...';
+    if (neta) neta.innerText = '...';
+
     try {
-        const result = await fetchGoogle({ pin: pin, action: 'get_dashboard', fecha: document.getElementById('fecha').value });
-        
-        if (result.status === 'success') {
-            dibujarGraficoDiario(result.diario);
-            dibujarGraficoAnual(result.anual);
+        const resultado = await fetchGoogle({
+            pin: localStorage.getItem('quiosco_pin'),
+            action: 'get_dashboard',
+            fecha: document.getElementById('fecha').value
+        });
+
+        if (resultado.status !== 'success') {
+            throw new Error(resultado.message || 'No se pudo cargar el panel.');
         }
-    } catch (e) {
-        console.error("Error cargando gráficos");
+
+        dibujarGraficoDiario(resultado.diario || []);
+        dibujarGraficoAnual(resultado.anual || {});
+    } catch (error) {
+        console.error('Error cargando gráficos:', error);
     }
 }
 
 function dibujarGraficoDiario(datosDiarios) {
-    let sumaIngresos = 0; let sumaInversion = 0; const porFecha = {};
+    let sumaIngresos = 0;
+    let sumaInversion = 0;
+    const porFecha = {};
+
     datosDiarios.forEach(reg => {
-        const monto = Number(reg.total);
-        const fechaCorta = reg.fecha.split('T')[0].substring(5); 
-        if (!porFecha[fechaCorta]) porFecha[fechaCorta] = { ingreso: 0, inversion: 0 };
-        if (reg.tipo === 'INGRESO') { sumaIngresos += monto; porFecha[fechaCorta].ingreso += monto; }
-        else { sumaInversion += monto; porFecha[fechaCorta].inversion += monto; }
+        const monto = Number(reg.total) || 0;
+        const fecha = String(reg.fecha).split('T')[0];
+        const fechaCorta = fecha.substring(5);
+
+        if (!porFecha[fechaCorta]) {
+            porFecha[fechaCorta] = { ingreso: 0, inversion: 0 };
+        }
+
+        if (String(reg.tipo).toUpperCase() === 'INGRESO') {
+            sumaIngresos += monto;
+            porFecha[fechaCorta].ingreso += monto;
+        } else {
+            sumaInversion += monto;
+            porFecha[fechaCorta].inversion += monto;
+        }
     });
 
-    document.getElementById('kpi-ingresos').innerText = "$" + sumaIngresos.toLocaleString('es-CL');
-    document.getElementById('kpi-inversion').innerText = "$" + sumaInversion.toLocaleString('es-CL');
-    document.getElementById('kpi-neta').innerText = "$" + (sumaIngresos - sumaInversion).toLocaleString('es-CL');
+    document.getElementById('kpi-ingresos').innerText =
+        '$' + sumaIngresos.toLocaleString('es-CL');
+
+    document.getElementById('kpi-inversion').innerText =
+        '$' + sumaInversion.toLocaleString('es-CL');
+
+    document.getElementById('kpi-neta').innerText =
+        '$' + (sumaIngresos - sumaInversion).toLocaleString('es-CL');
 
     const etiquetas = Object.keys(porFecha).sort();
-    const dataIng = etiquetas.map(f => porFecha[f].ingreso);
-    const dataInv = etiquetas.map(f => porFecha[f].inversion);
 
     if (chartDiario) chartDiario.destroy();
-    const ctx = document.getElementById('graficoDiario').getContext('2d');
-    chartDiario = new Chart(ctx, {
+
+    const canvas = document.getElementById('graficoDiario');
+    if (!canvas) return;
+
+    chartDiario = new Chart(canvas.getContext('2d'), {
         type: 'bar',
         data: {
             labels: etiquetas,
             datasets: [
-                { label: 'Ingresos', data: dataIng, backgroundColor: '#1E3A8A', borderRadius: 3 },
-                { label: 'Inversión', data: dataInv, backgroundColor: '#DC2626', borderRadius: 3 }
+                {
+                    label: 'Ingresos',
+                    data: etiquetas.map(f => porFecha[f].ingreso),
+                    backgroundColor: '#1E3A8A',
+                    borderRadius: 3
+                },
+                {
+                    label: 'Inversión',
+                    data: etiquetas.map(f => porFecha[f].inversion),
+                    backgroundColor: '#DC2626',
+                    borderRadius: 3
+                }
             ]
         },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } } } }
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: { boxWidth: 12 }
+                }
+            }
+        }
     });
 }
 
 function dibujarGraficoAnual(datosAnuales) {
-    const ordenMeses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"];
-    const mesesConDatos = Object.keys(datosAnuales).sort((a, b) => ordenMeses.indexOf(a) - ordenMeses.indexOf(b));
+    const ordenMeses = [
+        'ENERO', 'FEBRERO', 'MARZO', 'ABRIL',
+        'MAYO', 'JUNIO', 'JULIO', 'AGOSTO',
+        'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'
+    ];
 
-    const dataIng = mesesConDatos.map(m => datosAnuales[m].ingreso);
-    const dataNeto = mesesConDatos.map(m => datosAnuales[m].ingreso - datosAnuales[m].inversion);
+    const meses = Object.keys(datosAnuales).sort(
+        (a, b) => ordenMeses.indexOf(a) - ordenMeses.indexOf(b)
+    );
+
+    const dataIngresos = meses.map(
+        mes => Number(datosAnuales[mes].ingreso) || 0
+    );
+
+    const dataNeta = meses.map(mes =>
+        (Number(datosAnuales[mes].ingreso) || 0) -
+        (Number(datosAnuales[mes].inversion) || 0)
+    );
 
     if (chartMensual) chartMensual.destroy();
-    const ctx = document.getElementById('graficoMensual').getContext('2d');
-    chartMensual = new Chart(ctx, {
+
+    const canvas = document.getElementById('graficoMensual');
+    if (!canvas) return;
+
+    chartMensual = new Chart(canvas.getContext('2d'), {
         type: 'bar',
         data: {
-            labels: mesesConDatos.map(m => m.substring(0,3)), 
+            labels: meses.map(mes => mes.substring(0, 3)),
             datasets: [
-                { label: 'Ganancia Neta (Línea)', type: 'line', data: dataNeto, borderColor: '#059669', backgroundColor: '#059669', borderWidth: 2, tension: 0.3, yAxisID: 'y' },
-                { label: 'Ingresos Brutos', type: 'bar', data: dataIng, backgroundColor: '#D1D5DB', borderRadius: 4, yAxisID: 'y' }
+                {
+                    label: 'Ganancia Neta (Línea)',
+                    type: 'line',
+                    data: dataNeta,
+                    borderColor: '#059669',
+                    backgroundColor: '#059669',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Ingresos Brutos',
+                    type: 'bar',
+                    data: dataIngresos,
+                    backgroundColor: '#D1D5DB',
+                    borderRadius: 4,
+                    yAxisID: 'y'
+                }
             ]
         },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } } } }
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: { boxWidth: 12 }
+                }
+            }
+        }
     });
 }
+
+// Permite que otras partes de la página llamen estas funciones.
+window.cargarHistorial = cargarHistorial;
+window.renderizarDashboard = renderizarDashboard;
