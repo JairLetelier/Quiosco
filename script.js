@@ -1,5 +1,5 @@
 // Pega aquí la NUEVA URL que te dio Google Apps Script
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwoRIBjsSaQh9xuxGgoztpr2zpLtDywsgjLMGIBeI1Yircer6-q1o3oXLYkJN0qTuy3/exec';
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxE6i47aX4l1qbUqmSbD4KtwmlUIxpIAh5HmIsyF4GNW3mskW7Kuox9-o6eKqggvamv/exec';
 let currentType = 'ingreso';
 
 // Variables globales para los gráficos
