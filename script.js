@@ -1,5 +1,5 @@
 
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzDghmRzksyMetthrFPI0Y1MsuvnTbvLKYdnR1OeX9hnsa2xo33qJ1-6HeiyWVTWJOF/exec';
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyIcRbdjSGLw9__5aTVbHNWS8SWpDwBN5WqImGAlHQ3GGT-ioHjY0FFW_4o6porgbjm/exec';
 
 let currentType = 'ingreso';
 let chartDiario = null;
